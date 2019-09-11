@@ -185,7 +185,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
     // Reads arbitrary number of ".reg#" (.reg0-.reg99) config lines containing data in hexadecimal format.
     // ...reg# [p]hex_data[xN](writes arbitrary hex data); See comments for ReadWriteSPIstr function.
     // Powerful but potentially hazardous, this writes free-form raw data and has no knowledge of what drivers are on the SPI bus, their word length, or how they are arranged.
-    //if (chip==SPIDRVR)
+    if (chip==SPIDRVR)
     {
         int n=0;
         char nstr[3] = {'0', 0, 0};
