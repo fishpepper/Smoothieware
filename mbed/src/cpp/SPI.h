@@ -59,6 +59,7 @@ public:
      *  @param miso SPI Master In, Slave Out pin
      *  @param sclk SPI Clock pin
      */
+    SPI();
     SPI(PinName mosi, PinName miso, PinName sclk);
     virtual ~SPI() {};
 
@@ -76,13 +77,13 @@ public:
      *   3  |  1   1
      * @endcode
      */
-    void format(int bits, int mode = 0);
+    virtual void format(int bits, int mode = 0);
 
     /** Set the spi bus clock frequency
      *
      *  @param hz SCLK frequency in hz (default = 1MHz)
      */
-    void frequency(int hz = 1000000);
+    virtual void frequency(int hz = 1000000);
 
     /** Write to the SPI Slave and return the response
      *
@@ -92,8 +93,11 @@ public:
      *    Response from the SPI slave
     */
     virtual int write(int value);
-
+private:
+    void init(PinName mosi, PinName miso, PinName sclk);
+    
 protected:
+    void init_defaults(void);
     spi_t _spi;
 
     void aquire(void);

@@ -28,6 +28,7 @@ class MotorDriverControl : public Module {
         void on_second_tick(void *argument);
 
     private:
+        bool get_pin_name(uint16_t cs, uint16_t pin, PinName *pname);
         bool config_module(uint16_t cs);
         void initialize_chip(uint16_t cs);
         void set_current( uint32_t current );

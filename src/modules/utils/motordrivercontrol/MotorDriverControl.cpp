@@ -15,6 +15,7 @@
 #include "checksumm.h"
 
 #include "mbed.h" // for SPI
+#include "swspi/SWSPI.h" // for SWSPI
 
 #include "drivers/TMC26X/TMC26X.h"
 #include "drivers/DRV8711/drv8711.h"
@@ -39,6 +40,9 @@
 
 #define spi_channel_checksum           CHECKSUM("spi_channel")
 #define spi_cs_pin_checksum            CHECKSUM("spi_cs_pin")
+#define spi_mosi_pin_checksum            CHECKSUM("spi_mosi_pin")
+#define spi_miso_pin_checksum            CHECKSUM("spi_miso_pin")
+#define spi_sclk_pin_checksum            CHECKSUM("spi_sclk_pin")
 #define spi_frequency_checksum         CHECKSUM("spi_frequency")
 
 MotorDriverControl::MotorDriverControl(uint8_t id) : id(id)
@@ -68,6 +72,20 @@ void MotorDriverControl::on_module_loaded()
 
     // we don't need this instance anymore
     delete this;
+}
+
+bool MotorDriverControl::get_pin_name(uint16_t cs, uint16_t pin, PinName *pname)
+{
+    THEKERNEL->streams->printf("MotorDriverControl INFO: opening pin %s\r\n", THEKERNEL->config->value( motor_driver_control_checksum, cs, pin)->by_default("nc")->as_string().c_str());
+    
+    Pin *tmp = new Pin();
+    tmp->from_string(THEKERNEL->config->value( motor_driver_control_checksum, cs, pin)->by_default("nc")->as_string());
+    if(!tmp->connected()) {
+        THEKERNEL->streams->printf("MotorDriverControl ERROR: could not open that pin!\r\n");
+        return false;
+    }
+    *pname = port_pin((PortName)tmp->port_number, tmp->pin);
+    return true;
 }
 
 bool MotorDriverControl::config_module(uint16_t cs)
@@ -128,16 +146,33 @@ bool MotorDriverControl::config_module(uint16_t cs)
 
     // select SPI channel to use
     PinName mosi, miso, sclk;
+    bool soft_spi = false;
     if(spi_channel == 0) {
         mosi = P0_18; miso = P0_17; sclk = P0_15;
     } else if(spi_channel == 1) {
         mosi = P0_9; miso = P0_8; sclk = P0_7;
+    } else if(spi_channel == 9) {
+        // HACK: use spi channel 9 for software spi!
+        soft_spi = true;
+        // create pinNames:
+        if (!get_pin_name(cs, spi_mosi_pin_checksum, &mosi)) return false;
+        if (!get_pin_name(cs, spi_miso_pin_checksum, &miso)) return false;
+        if (!get_pin_name(cs, spi_sclk_pin_checksum, &sclk)) return false;
+        
+        THEKERNEL->streams->printf("MotorDriverControl %c INFO: using software spi\r\n", axis);
     } else {
-        THEKERNEL->streams->printf("MotorDriverControl %c ERROR: Unknown SPI Channel: %d\n", axis, spi_channel);
+        THEKERNEL->streams->printf("MotorDriverControl %c ERROR: Unknown SPI Channel: %d\r\n", axis, spi_channel);
         return false;
     }
+    spi_cs_pin.set(1);
 
-    this->spi = new mbed::SPI(mosi, miso, sclk);
+    if(soft_spi) {
+        THEKERNEL->streams->printf("MotorDriverControl %c INFO: swspi init\r\n", axis);
+        this->spi = new SWSPI(mosi, miso, sclk);
+        THEKERNEL->streams->printf("MotorDriverControl %c INFO: swspi init done\r\n", axis);
+    }else{
+        this->spi = new mbed::SPI(mosi, miso, sclk);
+    }
     this->spi->frequency(spi_frequency);
     this->spi->format(8, 3); // 8bit, mode3
 
@@ -145,6 +180,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
     switch(chip) {
         case DRV8711: max_current= 4000; break;
         case TMC2660: max_current= 3000; break;
+        case SPIDRVR: break;
     }
 
     max_current= THEKERNEL->config->value(motor_driver_control_checksum, cs, max_current_checksum )->by_default((int)max_current)->as_number(); // in mA
@@ -170,6 +206,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
                 switch(chip) {
                     case DRV8711: drv8711->set_raw_register(&StreamOutput::NullStream, ++reg, i); break;
                     case TMC2660: tmc26x->setRawRegister(&StreamOutput::NullStream, ++reg, i); break;
+                    case SPIDRVR: break;
                 }
             }
 
@@ -177,6 +214,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
             switch(chip) {
                 case DRV8711: drv8711->set_raw_register(&StreamOutput::NullStream, 255, 0); break;
                 case TMC2660: tmc26x->setRawRegister(&StreamOutput::NullStream, 255, 0); break;
+                case SPIDRVR: break;
             }
         }
     }
@@ -268,6 +306,8 @@ void MotorDriverControl::on_second_tick(void *argument)
         case TMC2660:
             alarm= tmc26x->checkAlarm();
             break;
+            
+        case SPIDRVR: break;
     }
 
     if(halt_on_alarm && alarm) {
@@ -420,6 +460,9 @@ void MotorDriverControl::set_current(uint32_t c)
         case TMC2660:
             tmc26x->setCurrent(c);
             break;
+            
+        case SPIDRVR: 
+            break;
     }
 }
 
@@ -436,6 +479,9 @@ uint32_t MotorDriverControl::set_microstep( uint32_t n )
             tmc26x->setMicrosteps(n);
             m= tmc26x->getMicrosteps();
             break;
+            
+        case SPIDRVR: 
+            break;
     }
     return m;
 }
@@ -446,6 +492,7 @@ void MotorDriverControl::set_decay_mode( uint8_t dm )
     switch(chip) {
         case DRV8711: break;
         case TMC2660: break;
+        case SPIDRVR: break;
     }
 }
 
@@ -458,6 +505,9 @@ void MotorDriverControl::enable(bool on)
 
         case TMC2660:
             tmc26x->setEnabled(on);
+            break;
+            
+        case SPIDRVR: 
             break;
     }
 }
@@ -472,6 +522,9 @@ void MotorDriverControl::dump_status(StreamOutput *stream, bool b)
         case TMC2660:
             tmc26x->dumpStatus(stream, b);
             break;
+        
+        case SPIDRVR: 
+            break;
     }
 }
 
@@ -481,6 +534,7 @@ void MotorDriverControl::set_raw_register(StreamOutput *stream, uint32_t reg, ui
     switch(chip) {
         case DRV8711: ok= drv8711->set_raw_register(stream, reg, val); break;
         case TMC2660: ok= tmc26x->setRawRegister(stream, reg, val); break;
+        case SPIDRVR: break;
     }
     if(ok) {
         stream->printf("register operation succeeded\n");
@@ -514,6 +568,9 @@ void MotorDriverControl::set_options(Gcode *gcode)
             // }
         }
         break;
+        
+        case SPIDRVR: 
+            break;
     }
 }
 
