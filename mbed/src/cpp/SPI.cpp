@@ -19,13 +19,26 @@
 
 namespace mbed {
 
+SPI::SPI() {
+    init_defaults();
+}
+
+    
 SPI::SPI(PinName mosi, PinName miso, PinName sclk) {
+    init_defaults();
+    init(mosi, miso, sclk);
+}
+
+void SPI::init(PinName mosi, PinName miso, PinName sclk) {
     spi_init(&_spi, mosi, miso, sclk, NC);
+    spi_format(&_spi, _bits, _mode, 0);
+    spi_frequency(&_spi, _hz);
+}
+
+void SPI::init_defaults(void) {
     _bits = 8;
     _mode = 0;
     _hz = 1000000;
-    spi_format(&_spi, _bits, _mode, 0);
-    spi_frequency(&_spi, _hz);
 }
 
 void SPI::format(int bits, int mode) {

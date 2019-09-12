@@ -3,6 +3,7 @@
 #include "libs/nuts_bolts.h"
 #include "libs/utils.h"
 #include "ConfigValue.h"
+#include "SerialMessage.h"
 #include "libs/StreamOutput.h"
 #include "libs/StreamOutputPool.h"
 #include "Robot.h"
@@ -14,6 +15,7 @@
 #include "checksumm.h"
 
 #include "mbed.h" // for SPI
+#include "swspi/SWSPI.h" // for SWSPI
 
 #include "drivers/TMC26X/TMC26X.h"
 #include "drivers/DRV8711/drv8711.h"
@@ -38,6 +40,9 @@
 
 #define spi_channel_checksum           CHECKSUM("spi_channel")
 #define spi_cs_pin_checksum            CHECKSUM("spi_cs_pin")
+#define spi_mosi_pin_checksum            CHECKSUM("spi_mosi_pin")
+#define spi_miso_pin_checksum            CHECKSUM("spi_miso_pin")
+#define spi_sclk_pin_checksum            CHECKSUM("spi_sclk_pin")
 #define spi_frequency_checksum         CHECKSUM("spi_frequency")
 
 MotorDriverControl::MotorDriverControl(uint8_t id) : id(id)
@@ -67,6 +72,20 @@ void MotorDriverControl::on_module_loaded()
 
     // we don't need this instance anymore
     delete this;
+}
+
+bool MotorDriverControl::get_pin_name(uint16_t cs, uint16_t pin, PinName *pname)
+{
+    THEKERNEL->streams->printf("MotorDriverControl INFO: opening pin %s\r\n", THEKERNEL->config->value( motor_driver_control_checksum, cs, pin)->by_default("nc")->as_string().c_str());
+    
+    Pin *tmp = new Pin();
+    tmp->from_string(THEKERNEL->config->value( motor_driver_control_checksum, cs, pin)->by_default("nc")->as_string());
+    if(!tmp->connected()) {
+        THEKERNEL->streams->printf("MotorDriverControl ERROR: could not open that pin!\r\n");
+        return false;
+    }
+    *pname = port_pin((PortName)tmp->port_number, tmp->pin);
+    return true;
 }
 
 bool MotorDriverControl::config_module(uint16_t cs)
@@ -112,6 +131,10 @@ bool MotorDriverControl::config_module(uint16_t cs)
         chip= TMC2660;
         tmc26x= new TMC26X(std::bind( &MotorDriverControl::sendSPI, this, _1, _2, _3), axis);
 
+    }else if(str == "SPIDRVR") {
+        // Generic SPI driver (allows for initialization of unsupported chips using raw hex data).
+        chip= SPIDRVR;
+
     }else{
         THEKERNEL->streams->printf("MotorDriverControl %c ERROR: Unknown chip type: %s\n", axis, str.c_str());
         return false;
@@ -123,16 +146,33 @@ bool MotorDriverControl::config_module(uint16_t cs)
 
     // select SPI channel to use
     PinName mosi, miso, sclk;
+    bool soft_spi = false;
     if(spi_channel == 0) {
         mosi = P0_18; miso = P0_17; sclk = P0_15;
     } else if(spi_channel == 1) {
         mosi = P0_9; miso = P0_8; sclk = P0_7;
+    } else if(spi_channel == 9) {
+        // HACK: use spi channel 9 for software spi!
+        soft_spi = true;
+        // create pinNames:
+        if (!get_pin_name(cs, spi_mosi_pin_checksum, &mosi)) return false;
+        if (!get_pin_name(cs, spi_miso_pin_checksum, &miso)) return false;
+        if (!get_pin_name(cs, spi_sclk_pin_checksum, &sclk)) return false;
+        
+        THEKERNEL->streams->printf("MotorDriverControl %c INFO: using software spi\r\n", axis);
     } else {
-        THEKERNEL->streams->printf("MotorDriverControl %c ERROR: Unknown SPI Channel: %d\n", axis, spi_channel);
+        THEKERNEL->streams->printf("MotorDriverControl %c ERROR: Unknown SPI Channel: %d\r\n", axis, spi_channel);
         return false;
     }
+    spi_cs_pin.set(1);
 
-    this->spi = new mbed::SPI(mosi, miso, sclk);
+    if(soft_spi) {
+        THEKERNEL->streams->printf("MotorDriverControl %c INFO: swspi init\r\n", axis);
+        this->spi = new SWSPI(mosi, miso, sclk);
+        THEKERNEL->streams->printf("MotorDriverControl %c INFO: swspi init done\r\n", axis);
+    }else{
+        this->spi = new mbed::SPI(mosi, miso, sclk);
+    }
     this->spi->frequency(spi_frequency);
     this->spi->format(8, 3); // 8bit, mode3
 
@@ -140,6 +180,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
     switch(chip) {
         case DRV8711: max_current= 4000; break;
         case TMC2660: max_current= 3000; break;
+        case SPIDRVR: break;
     }
 
     max_current= THEKERNEL->config->value(motor_driver_control_checksum, cs, max_current_checksum )->by_default((int)max_current)->as_number(); // in mA
@@ -153,6 +194,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
     initialize_chip(cs);
 
     // if raw registers are defined set them 1,2,3 etc in hex
+    rawreg=false;
     str= THEKERNEL->config->value( motor_driver_control_checksum, cs, raw_register_checksum)->by_default("")->as_string();
     if(!str.empty()) {
         rawreg= true;
@@ -164,6 +206,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
                 switch(chip) {
                     case DRV8711: drv8711->set_raw_register(&StreamOutput::NullStream, ++reg, i); break;
                     case TMC2660: tmc26x->setRawRegister(&StreamOutput::NullStream, ++reg, i); break;
+                    case SPIDRVR: break;
                 }
             }
 
@@ -171,14 +214,34 @@ bool MotorDriverControl::config_module(uint16_t cs)
             switch(chip) {
                 case DRV8711: drv8711->set_raw_register(&StreamOutput::NullStream, 255, 0); break;
                 case TMC2660: tmc26x->setRawRegister(&StreamOutput::NullStream, 255, 0); break;
+                case SPIDRVR: break;
             }
         }
+    }
 
-    }else{
-        rawreg= false;
+    // Write arbitrary bytes/words to SPI in order to initialize any driver(s).
+    // Reads arbitrary number of ".reg#" (.reg0-.reg99) config lines containing data in hexadecimal format.
+    // ...reg# [p]hex_data[xN](writes arbitrary hex data); See comments for ReadWriteSPIstr function.
+    // Powerful but potentially hazardous, this writes free-form raw data and has no knowledge of what drivers are on the SPI bus, their word length, or how they are arranged.
+    if (chip==SPIDRVR)
+    {
+        int n=0;
+        char nstr[3] = {'0', 0, 0};
+        while ((n<100) && !(str=THEKERNEL->config->value(motor_driver_control_checksum, cs, get_checksum(nstr,raw_register_checksum))->by_default("")->as_string()).empty()) {
+            //THEKERNEL->streams->printf("motor_driver_control...reg%s %s\n",nstr,str.c_str());
+            WriteReadSPIstr(str.c_str(),THEKERNEL->streams);
+            n++;    // Increment to check for next ".reg#" line.
+            nstr[0]=n%10 + '0';
+            if (n>9) {
+                nstr[1]=nstr[0];
+                nstr[0]=n/10 + '0';
+            }
+            rawreg=true;
+        }
     }
 
     this->register_for_event(ON_GCODE_RECEIVED);
+    this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
     this->register_for_event(ON_HALT);
     this->register_for_event(ON_ENABLE);
     this->register_for_event(ON_IDLE);
@@ -189,7 +252,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
         this->register_for_event(ON_SECOND_TICK);
     }
 
-    THEKERNEL->streams->printf("MotorDriverControl INFO: configured motor %c (%d): as %s, cs: %04X\n", axis, id, chip==TMC2660?"TMC2660":chip==DRV8711?"DRV8711":"UNKNOWN", (spi_cs_pin.port_number<<8)|spi_cs_pin.pin);
+    THEKERNEL->streams->printf("MotorDriverControl INFO: configured motor %c (%d): as %s, cs: %04X\n", axis, id, chip==TMC2660?"TMC2660":chip==DRV8711?"DRV8711":chip==SPIDRVR?"SPIdrvr":"UNKNOWN", (spi_cs_pin.port_number<<8)|spi_cs_pin.pin);
 
     return true;
 }
@@ -243,6 +306,8 @@ void MotorDriverControl::on_second_tick(void *argument)
         case TMC2660:
             alarm= tmc26x->checkAlarm();
             break;
+            
+        case SPIDRVR: break;
     }
 
     if(halt_on_alarm && alarm) {
@@ -336,6 +401,37 @@ void MotorDriverControl::on_gcode_received(void *argument)
     }
 }
 
+void MotorDriverControl::on_console_line_received(void *argument) {
+    if(THEKERNEL->is_halted()) return;    // If in halted state ignore commands
+
+    SerialMessage *msgp = static_cast<SerialMessage *>(argument);
+    string possible_command = msgp->message;
+
+    // ignore anything that is not lowercase or a letter
+    if(possible_command.empty() || !islower(possible_command[0]) || !isalpha(possible_command[0])) {
+        return;
+    }
+
+    string cmd=shift_parameter(possible_command);
+
+    // Act depending on command
+    if (cmd=="sendSPIdrv") {
+        //sendSPIdrv {axis} [p]hexdata[xN][_hexdata[xN]][,hexdata[xN][_hexdata[xN]]],...]
+        //Write/read raw hexdata to/from SPI.
+        //Axis to match this->axis, as set during object config.
+        //See comments for WriteReadSPIstr function.
+        cmd=shift_parameter(possible_command);    // Get axis.
+        if (cmd.empty()) {
+            msgp->stream->printf("Usage: sendSPIdrv {axis} [p]hexdata[xN][_hexdata[xN]][,hexdata[xN][_hexdata[xN]]],...]\n");
+        }
+        else if (cmd.c_str()[0]==axis) {
+            if (!(cmd=shift_parameter(possible_command)).empty()) {    // Get hexdata string.
+                WriteReadSPIstr(cmd.c_str(),msgp->stream);
+            }
+        }
+    }
+}
+
 void MotorDriverControl::initialize_chip(uint16_t cs)
 {
     // send initialization sequence to chips
@@ -364,6 +460,9 @@ void MotorDriverControl::set_current(uint32_t c)
         case TMC2660:
             tmc26x->setCurrent(c);
             break;
+            
+        case SPIDRVR: 
+            break;
     }
 }
 
@@ -380,6 +479,9 @@ uint32_t MotorDriverControl::set_microstep( uint32_t n )
             tmc26x->setMicrosteps(n);
             m= tmc26x->getMicrosteps();
             break;
+            
+        case SPIDRVR: 
+            break;
     }
     return m;
 }
@@ -390,6 +492,7 @@ void MotorDriverControl::set_decay_mode( uint8_t dm )
     switch(chip) {
         case DRV8711: break;
         case TMC2660: break;
+        case SPIDRVR: break;
     }
 }
 
@@ -402,6 +505,9 @@ void MotorDriverControl::enable(bool on)
 
         case TMC2660:
             tmc26x->setEnabled(on);
+            break;
+            
+        case SPIDRVR: 
             break;
     }
 }
@@ -416,6 +522,9 @@ void MotorDriverControl::dump_status(StreamOutput *stream, bool b)
         case TMC2660:
             tmc26x->dumpStatus(stream, b);
             break;
+        
+        case SPIDRVR: 
+            break;
     }
 }
 
@@ -425,6 +534,7 @@ void MotorDriverControl::set_raw_register(StreamOutput *stream, uint32_t reg, ui
     switch(chip) {
         case DRV8711: ok= drv8711->set_raw_register(stream, reg, val); break;
         case TMC2660: ok= tmc26x->setRawRegister(stream, reg, val); break;
+        case SPIDRVR: break;
     }
     if(ok) {
         stream->printf("register operation succeeded\n");
@@ -458,17 +568,89 @@ void MotorDriverControl::set_options(Gcode *gcode)
             // }
         }
         break;
+        
+        case SPIDRVR: 
+            break;
     }
 }
+
+
+// Parse a raw hexadecimal data string and write to SPI, then optionally print received data.
+// String format:  [p]hexdata[xN][_hexdata[xN]][,hexdata[xN][_hexdata[xN]]],...]
+// Writes arbitrary hexdata bytes/words.  Assumes hexadecimal (upper case) -- do not prefix with '0x' or postfix with 'h'.
+// Leading zeros in hexdata are significant since they are used to determine word length; i.e., number of bits to shift onto the SPI.
+// If first char is 'p', then prints received data after write. If first char is 'P', then prints received data after writing hexdata twice.
+//     ('p' is typically for use with a no-op/status command to view the result of a previously written command.)
+//     ('P' is typically for use with sending a status command and immediately sending it again to shift out, and print, its response.)
+// If 'xN' at end of hexdata, then repeats hexdata N times in buffer before writing -- typically used to write the same data to multiple similar devices that are daisy-chained on the SPI bus and similarly initialized/commanded.
+// Underscores '_' (and most other extraneous characters) between hexdata words denote the start of data for 'xN', otherwise ignored.
+// Comma separators or end of line will write previous data as an individual SPI write (SSEL) cycle.
+// Powerful but potentially hazardous, this writes free-form raw data and has no knowledge of what drivers are on the SPI bus, their word lengths, or how they are arranged on the bus.
+void MotorDriverControl::WriteReadSPIstr(const char* p, StreamOutput* stream)
+{
+    int x,xx;
+    uint8_t nib,paw=0,buf[40];
+
+    //stream->printf("WriteReadSPIstr: %s\n",p);
+
+    do {
+        buf[0]=0;
+        for (x=xx=0, nib=1; (x<40) && *p && (*p!=','); p++) {
+            if ((*p>='0') && (*p<='9'))        // Translate hex digits.
+                buf[x]=(buf[x]<<4)|(*p-'0');
+            else if ((*p>='A') && (*p<='F'))
+                buf[x]=(buf[x]<<4)|(*p-'A'+0xA);
+            else if (*p=='x') {        // Copy data n times in buffer.
+                int n=1;
+                if (!nib) buf[x++]<<=4, nib=1;  // This shouldn't happen, but in case last byte wasn't complete, do something consistent.
+                ++p;
+                if ((*p>='2') && (*p<='9')) n=*p-'0';
+                while (--n) for (int i=x-xx; (x<40) && i; i--) buf[x++]=buf[xx++];
+                xx=x;
+                continue;
+            }
+            else if (!x && nib && ((*p|0x20)=='p')) {  // 'p' or 'P' at beginning of line.
+                paw=*p;
+                continue;
+            }
+            else {    // Underscore '_' and other extraneous characters.
+                xx=x;
+                continue;
+            }
+            if (nib^=1) buf[++x]=0;  // Toggle nibble, and increment x when going from low- to high-nibble (next byte).
+        }
+        if (!nib) buf[x++]<<=4;  // This shouldn't happen, but in case last byte wasn't complete, do something consistent.
+        if (x) {
+            //if (stream) {
+            //    stream->printf("SPI <- ");
+            //    for (int n=0; n<x; n++) stream->printf("%02X",buf[n]);
+            //    stream->printf("\n");
+            //}
+            if (paw!='p') sendSPI(buf,x,NULL);  // Send (and dump received) data on SPI bus.
+            if (paw) {  // If print-after-write, then print received data.
+                sendSPI(buf,x,buf);    // Send and receive data on SPI bus.
+                if (stream) {
+                    stream->printf("SPI -> ");
+                    for (int n=0; n<x; n++) stream->printf("%02X",buf[n]);
+                    stream->printf("\n");
+                }
+            }
+        }
+    } while (*p++==',');
+}
+
 
 // Called by the drivers codes to send and receive SPI data to/from the chip
-int MotorDriverControl::sendSPI(uint8_t *b, int cnt, uint8_t *r)
+int MotorDriverControl::sendSPI(uint8_t *b, int cnt, uint8_t *r /* =0 */)
 {
-    spi_cs_pin.set(0);
-    for (int i = 0; i < cnt; ++i) {
-        r[i]= spi->write(b[i]);
+    if (b && cnt) {
+        uint8_t x;
+        spi_cs_pin.set(0);
+        for (int i = 0; i < cnt; ++i) {
+            x=spi->write(b[i]);
+            if (r) r[i]=x;
+        }
+        spi_cs_pin.set(1);
     }
-    spi_cs_pin.set(1);
     return cnt;
 }
-
