@@ -21,12 +21,14 @@ class MotorDriverControl : public Module {
 
         void on_module_loaded();
         void on_gcode_received(void *);
+        void on_console_line_received(void *);
         void on_halt(void *argument);
         void on_enable(void *argument);
         void on_idle(void *argument);
         void on_second_tick(void *argument);
 
     private:
+        bool get_pin_name(uint16_t cs, uint16_t pin, PinName *pname);
         bool config_module(uint16_t cs);
         void initialize_chip(uint16_t cs);
         void set_current( uint32_t current );
@@ -37,12 +39,14 @@ class MotorDriverControl : public Module {
         void set_options(Gcode *gcode);
 
         void enable(bool on);
-        int sendSPI(uint8_t *b, int cnt, uint8_t *r);
+        void WriteReadSPIstr(const char *p, StreamOutput *stream);
+        int sendSPI(uint8_t *b, int cnt, uint8_t *r=NULL);
 
         Pin spi_cs_pin;
         mbed::SPI *spi;
 
         enum CHIP_TYPE {
+            SPIDRVR,
             DRV8711,
             TMC2660
         };
