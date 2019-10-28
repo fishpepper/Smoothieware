@@ -9,6 +9,7 @@
 #include "libs/Module.h"
 #include "libs/Kernel.h"
 #include "SpindleControl.h"
+#include "ESCSpindleControl.h"
 #include "PWMSpindleControl.h"
 #include "AnalogSpindleControl.h"
 #include "HuanyangSpindleControl.h"
@@ -38,7 +39,9 @@ void SpindleMaker::load_spindle(){
     std::string vfd_type = THEKERNEL->config->value( spindle_checksum, spindle_vfd_type_checksum )->by_default("none")->as_string(); 
 
     // check config which spindle type we need
-    if( spindle_type.compare("pwm") == 0 ) {
+    if (spindle_type.compare("esc") == 0 ) {
+        spindle = new ESCSpindleControl();
+    } else if( spindle_type.compare("pwm") == 0 ) {
         spindle = new PWMSpindleControl();
     } else if ( spindle_type.compare("analog") == 0 ) {
         spindle = new AnalogSpindleControl();
