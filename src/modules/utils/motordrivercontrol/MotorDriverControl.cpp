@@ -252,7 +252,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
         this->register_for_event(ON_SECOND_TICK);
     }
 
-    THEKERNEL->streams->printf("MotorDriverControl INFO: configured motor %c (%d): as %s, cs: %04X\n", axis, id, chip==TMC2660?"TMC2660":chip==DRV8711?"DRV8711":chip==SPIDRVR?"SPIdrvr":"UNKNOWN", (spi_cs_pin.port_number<<8)|spi_cs_pin.pin);
+    THEKERNEL->streams->printf("MotorDriverControl INFO: configured motor %c (%d): as %s, cs: %04X\r\n", axis, id, chip==TMC2660?"TMC2660":chip==DRV8711?"DRV8711":chip==SPIDRVR?"SPIdrvr":"UNKNOWN", (spi_cs_pin.port_number<<8)|spi_cs_pin.pin);
 
     return true;
 }
