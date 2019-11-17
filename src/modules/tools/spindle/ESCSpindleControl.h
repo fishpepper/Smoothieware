@@ -22,6 +22,7 @@ class ESCSpindleControl: public SpindleControl {
         ESCSpindleControl();
         virtual ~ESCSpindleControl() {};
         void on_module_loaded();
+        void on_second_tick(void* argument);
     
     private:
         uint32_t on_update_speed(uint32_t dummy);
@@ -29,7 +30,7 @@ class ESCSpindleControl: public SpindleControl {
         mbed::PwmOut *pwm_pin; // PWM output for spindle speed control
         bool output_inverted;
        
-        bool vfd_spindle; // true if we have a VFD driven spindle
+        bool waiting; // true if we have a VFD driven spindle
 
         // Current values, updated at runtime
         float current_rpm;

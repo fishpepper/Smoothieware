@@ -33,7 +33,7 @@
 // initial rpm
 #define spindle_default_rpm_checksum        CHECKSUM("default_rpm")
 
-#define UPDATE_FREQ 1000
+#define UPDATE_FREQ 10
 
 PWMSpindleControl::PWMSpindleControl()
 {
@@ -45,6 +45,7 @@ void PWMSpindleControl::on_module_loaded()
     current_pwm_value = 0;
     
     spindle_on = false;
+    waiting = false;
     
     pwm_scale_a = THEKERNEL->config->value(spindle_checksum, spindle_pwm_scale_a_checksum)->by_default(1.0f)->as_number();
     pwm_scale_b = THEKERNEL->config->value(spindle_checksum, spindle_pwm_scale_b_checksum)->by_default(1.0f)->as_number();
@@ -69,7 +70,7 @@ void PWMSpindleControl::on_module_loaded()
     
     if (pwm_pin == NULL)
     {
-        THEKERNEL->streams->printf("Error: Spindle PWM pin must be P2.0-2.5 or other PWM pin\n");
+        THEKERNEL->streams->printf("ESC Spindle: spindle PWM pin must be P2.0-2.5 or other PWM pin\n");
         delete this;
         return;
     }
@@ -81,6 +82,14 @@ void PWMSpindleControl::on_module_loaded()
     THEKERNEL->slow_ticker->attach(UPDATE_FREQ, this, &PWMSpindleControl::on_update_speed);
 }
 
+
+void PWMSpindleControl::on_second_tick(void *argument)
+{
+    // If waiting for a speed to be reached, display current speed
+    if (waiting){
+        report_speed();
+    }
+}
 
 uint32_t PWMSpindleControl::on_update_speed(uint32_t dummy)
 {
@@ -129,12 +138,33 @@ void PWMSpindleControl::turn_off() {
 
 void PWMSpindleControl::set_speed(int rpm) {
     target_rpm = rpm;
+    
+    // we need to sleep until we reach the target speed
+    this->waiting = true; 
+    THEKERNEL->streams->printf("ESC Spindle: waiting for spindle to reach speed...\n");
+    
+    float tdiff;
+    do {
+        THEKERNEL->call_event(ON_IDLE, this);
+        
+        // check if ON_HALT was called (usually by kill button)
+        if(THEKERNEL->is_halted()) {
+            THEKERNEL->streams->printf("ESC Spindle: wait aborted by kill\n");
+            break;
+        }
+        
+        // calc speed diff
+        tdiff =  fabs(current_rpm - target_rpm);
+    } while (tdiff > 200);
+    
+    this->waiting = false;
+    THEKERNEL->streams->printf("ESC Spindle: speed reached!\n");
 }
 
 
 void PWMSpindleControl::report_speed() {
-    THEKERNEL->streams->printf("Current RPM: %5.0f  Target RPM: %5.0f  PWM value: %5.3f\n",
-                               current_rpm, target_rpm, current_pwm_value);
+    THEKERNEL->streams->printf("ESC Spindle: target speed %5f, current speed %5f [PWM = %5.3f]\n", 
+                               target_rpm, current_rpm, current_pwm_value);
 }
 
 /*
@@ -151,7 +181,7 @@ void PWMSpindleControl::set_d_term(float d) {
 */
 
 void PWMSpindleControl::report_settings() {
-    THEKERNEL->streams->printf("scale_a: %0.6f scale_b: %0.6f period: %0.2f",
+    THEKERNEL->streams->printf("ESC Spindle: scale_a: %0.6f scale_b: %0.6f period: %0.2f",
                                pwm_factor_a, pwm_factor_b, pwm_period);
 }
 
