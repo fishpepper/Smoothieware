@@ -48,7 +48,7 @@ SWSPI::~SWSPI()
  
 void SWSPI::format(int bits, int mode)
 {
-    THEKERNEL->streams->printf("MotorDriverControl INFO: format\r\n");
+    THEKERNEL->streams->printf("MotorDriverControl INFO: format bits = 0x%x, mode = 0x%x\r\n",bits,mode);
     _bits = bits;
     _mode = mode;
     polarity = (mode >> 1) & 1;
@@ -58,13 +58,13 @@ void SWSPI::format(int bits, int mode)
  
 void SWSPI::frequency(int hz)
 {
-    THEKERNEL->streams->printf("MotorDriverControl INFO: frequency\r\n");
+    THEKERNEL->streams->printf("MotorDriverControl INFO: frequency %d\r\n", hz);
     _hz = hz;
 }
  
 int SWSPI::write(int value)
 {
-    THEKERNEL->streams->printf("MotorDriverControl INFO: write(%x)\r\n", value);
+    //THEKERNEL->streams->printf("MotorDriverControl INFO: write(%x)\r\n", value);
     int read = 0;
     for (int bit = _bits-1; bit >= 0; --bit)
     {
@@ -91,6 +91,6 @@ int SWSPI::write(int value)
         wait(1.0/_hz/2);
     }
     
-    THEKERNEL->streams->printf("MotorDriverControl INFO: result = %x\r\n", read);
+    //THEKERNEL->streams->printf("MotorDriverControl INFO: result = %x\r\n", read);
     return read;
 }
