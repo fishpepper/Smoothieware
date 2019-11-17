@@ -637,6 +637,18 @@ void Robot::on_gcode_received(void *argument)
             //     if(THEKERNEL->is_grbl_mode()) THEKERNEL->set_feed_hold(gcode->subcode == 0);
             //     break;
 
+            case 3: 
+            case 4:
+                // set spindle speed
+                if(gcode->has_letter('S')){
+                    s_value = gcode->get_value('S');
+                }
+                break;
+                
+            case 5:
+                s_value = 0.0;
+                break;
+                
             case 30: // M30 end of program in grbl mode (otherwise it is delete sdcard file)
                 if(!THEKERNEL->is_grbl_mode()) break;
                 // fall through to M2

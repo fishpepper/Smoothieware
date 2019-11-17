@@ -36,6 +36,7 @@ class ESCSpindleControl: public SpindleControl {
         float current_rpm;
         float target_rpm;
         float current_pwm_value;
+        float ramp_rpm;
 
         // Values from config
         float pwm_period;

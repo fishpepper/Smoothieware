@@ -37,6 +37,8 @@ void SpindleMaker::load_spindle(){
     // get the two config options that make us able to determine which spindle module we need to load
     std::string spindle_type = THEKERNEL->config->value( spindle_checksum, spindle_type_checksum )->by_default("pwm")->as_string();
     std::string vfd_type = THEKERNEL->config->value( spindle_checksum, spindle_vfd_type_checksum )->by_default("none")->as_string(); 
+    
+    THEKERNEL->streams->printf("NOTE: Spindle Module is enabled, type='%s'\n", spindle_type.c_str());
 
     // check config which spindle type we need
     if (spindle_type.compare("esc") == 0 ) {
