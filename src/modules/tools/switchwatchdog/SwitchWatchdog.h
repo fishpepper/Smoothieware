@@ -63,5 +63,6 @@ private:
             bool      activated:1;
             bool      timed_out:1;
             bool      command_sent:1;
+            bool      debug_enabled:1;
     };
 };

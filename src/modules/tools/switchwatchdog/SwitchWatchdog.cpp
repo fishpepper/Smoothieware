@@ -35,6 +35,7 @@ SwitchWatchdog::SwitchWatchdog(uint16_t name)
     this->command_sent  = false;
     this->name_checksum = name;
     this->activated     = false;
+    this->debug_enabled = false;
 }
 
 SwitchWatchdog::~SwitchWatchdog()
@@ -140,6 +141,9 @@ void SwitchWatchdog::on_gcode_received(void *argument)
         reset_timer();
         // debug info
         THEKERNEL->streams->printf("// SwitchWatchdog: CLEAR GCODE received... cleared timer\r\n");
+    } else if(match_gcode(gcode, 779, 'G')) {
+        THEKERNEL->streams->printf("// SwitchWatchdog: enabled debug mode\r\n");
+        debug_enabled = true;
     }
     
     // check if timed out:
@@ -170,6 +174,8 @@ void SwitchWatchdog::on_console_line_received( void *argument )
 
 void SwitchWatchdog::on_second_tick(void *argument)
 {
+    if (debug_enabled) THEKERNEL->streams->printf("// SwitchWatchdog: pin = %d\r\n", pin.get());
+    
     // timed out? 
     if(timed_out) return;
     
