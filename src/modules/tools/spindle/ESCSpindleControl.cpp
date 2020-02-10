@@ -48,7 +48,8 @@ void ESCSpindleControl::on_module_loaded()
 {
     current_rpm = 0;
     current_pwm_value = 0;
-    
+
+    manual_pwm_control_active = false;
     spindle_on = false;
     waiting = false;
     
@@ -84,6 +85,8 @@ void ESCSpindleControl::on_module_loaded()
     
     this->register_for_event(ON_SECOND_TICK);
 
+    set_pwm(0);
+
     THEKERNEL->slow_ticker->attach(UPDATE_FREQ, this, &ESCSpindleControl::on_update_speed);
     THEKERNEL->streams->printf("ESC Spindle: module loaded\r\n");
 }
@@ -102,6 +105,10 @@ uint32_t ESCSpindleControl::on_update_speed(uint32_t dummy)
 {
     float target;
 
+    if (manual_pwm_control_active){
+        return 0;
+    }
+    
     if (spindle_on) {
         target = target_rpm;
     }else{
@@ -111,7 +118,9 @@ uint32_t ESCSpindleControl::on_update_speed(uint32_t dummy)
     // do ramp up/down:
     float new_rpm = current_rpm;
     
-    if (new_rpm < target){
+    if (new_rpm == target){
+	// do nothing
+    }else if (new_rpm < target){
         // increment rpm!
         new_rpm += ramp_rpm;
         if (new_rpm > target){
@@ -127,13 +136,27 @@ uint32_t ESCSpindleControl::on_update_speed(uint32_t dummy)
     
     // convert to pwm signal:
     float pwm = pwm_scale_a * new_rpm + pwm_scale_b;
+ 
+    if (new_rpm == 0.0){
+	    pwm = 0;
+    }
+
+    // update pwm output
+    set_pwm(pwm);
     
+    // store old value
+    current_rpm = new_rpm;
+
+    return 0;
+}
+
+void ESCSpindleControl::set_pwm(float pwm){
     // limit to valid pwm values:
     // 5-10% of 20ms period -> 1ms -2ms = servo signal
     // rescale to percentage of pwm
     current_pwm_value = confine(pwm, 5.0f, 10.0f) / 100.0;
     
-    if (current_pwm_value < 0.04) THEKERNEL->streams->printf("ESC Spindle: pwm = %f\r\n", current_pwm_value);
+    //THEKERNEL->streams->printf("ESC Spindle: pwm = %f\r\n", current_pwm_value);
     
     // set to output:
     if (output_inverted)
@@ -141,10 +164,6 @@ uint32_t ESCSpindleControl::on_update_speed(uint32_t dummy)
     else
         pwm_pin->write(current_pwm_value);
     
-    // store old value
-    current_rpm = new_rpm;
-
-    return 0;
 }
 
 void ESCSpindleControl::turn_on() {
@@ -158,6 +177,7 @@ void ESCSpindleControl::turn_off() {
 
 
 void ESCSpindleControl::set_speed(int rpm) {
+    manual_pwm_control_active = false;
     target_rpm = rpm;
     
     // we need to sleep until we reach the target speed
@@ -176,7 +196,7 @@ void ESCSpindleControl::set_speed(int rpm) {
         
         // calc speed diff
         tdiff =  fabs(current_rpm - target_rpm);
-    } while (tdiff > 200);
+    } while (tdiff >= 200);
     
     this->waiting = false;
     
@@ -188,25 +208,38 @@ void ESCSpindleControl::set_speed(int rpm) {
 void ESCSpindleControl::report_speed() {
     THEKERNEL->streams->printf("[S%f]\r\n", current_rpm);
     
-    THEKERNEL->streams->printf("ESC Spindle: target speed %5f, current speed %5f [PWM = %5.3f]\r\n", 
+    THEKERNEL->streams->printf("ESC Spindle: target speed %5f, current speed %5f [PWM = %5.6f]\r\n", 
                                target_rpm, current_rpm, current_pwm_value);
 }
 
-/*
+// misuse pid settings to configure the scaling
 void ESCSpindleControl::set_p_term(float p) {
+    pwm_scale_a = p;
 }
 
 
 void ESCSpindleControl::set_i_term(float i) {
+    pwm_scale_b = i;
 }
 
 
+// use this for debugging and initial set up to find pwm_scale_*
 void ESCSpindleControl::set_d_term(float d) {
+    // activate manual speed control
+    if (d > 0.0){
+        manual_pwm_control_active = true;
+    }else{
+        manual_pwm_control_active = false;
+    }
+    
+    //set pwm value. note: make sure to pass a valid value (5.0... 10.0)
+    set_pwm(d);
+    THEKERNEL->streams->printf("ESC Spindle: pwm set to %f\r\n", d);
 }
-*/
+
 
 void ESCSpindleControl::report_settings() {
-    THEKERNEL->streams->printf("ESC Spindle: pwm(f) = %0.6f * f + %0.6f [current pwm period: %0.2f]\r\n",
-                               pwm_scale_a, pwm_scale_b, pwm_period);
+    THEKERNEL->streams->printf("ESC Spindle: pwm(f) = %0.6f * f + %0.6f [current pwm period: %0.2f, pwm=%5.6f]\r\n",
+                               pwm_scale_a, pwm_scale_b, pwm_period, current_pwm_value);
 }
 

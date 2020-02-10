@@ -43,14 +43,17 @@ class ESCSpindleControl: public SpindleControl {
         float pwm_scale_a;
         float pwm_scale_b;
         float smoothing_decay;
+        bool manual_pwm_control_active;
 
         void turn_on(void);
         void turn_off(void);
         void set_speed(int);
         void report_speed(void);
-        //void set_p_term(float);
-        //void set_i_term(float);
-        //void set_d_term(float);
+        void set_pwm(float);
+        
+        void set_p_term(float);
+        void set_i_term(float);
+        void set_d_term(float);
         void report_settings(void);
 };
 
